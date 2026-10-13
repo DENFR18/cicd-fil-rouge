@@ -9,31 +9,72 @@ on:
 permissions:
   contents: read
 
+# Un seul run par branche : un nouveau push sur une PR annule le run précédent.
+# Sur main, on laisse chaque run aller au bout.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
       - name: Installer ruff
         run: pip install ruff
       - name: Lint
         run: ruff check .
 
   test:
-    name: test
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
       - name: Installer les dépendances
         run: |
           pip install pytest httpx
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Tests
-        run: pytest -v
+        run: pytest -v --junitxml=reports/junit-${{ matrix.python-version }}.xml
+      - name: Publier le rapport de tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-tests-${{ matrix.python-version }}
+          path: reports/junit-${{ matrix.python-version }}.xml
+          retention-days: 7
+
+  ci-ok:
+    name: CI OK
+    needs: [lint, test]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Vérifier le résultat des jobs
+        run: |
+          echo "lint : ${{ needs.lint.result }}"
+          echo "test : ${{ needs.test.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Au moins un job a échoué ou a été annulé."
+            exit 1
+          fi
+          echo "Tous les jobs sont verts."
