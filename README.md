@@ -11,7 +11,7 @@ Ce dépôt est un fork public de [`9m7fjfpv9k-cyber/cicd-fil-rouge`](https://git
 | Membre | Compte GitHub | Rôle |
 |---|---|---|
 | Denilsson | [@DENFR18](https://github.com/DENFR18) | Propriétaire du fork, code owner |
-| Binôme | [@IB432](https://github.com/IB432) | Collaborateur (write), code owner |
+| Illies | [@IB432](https://github.com/IB432) | Collaborateur (write), code owner |
 
 ## Structure du projet
 
