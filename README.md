@@ -11,7 +11,7 @@ Ce dépôt est un fork public de [`9m7fjfpv9k-cyber/cicd-fil-rouge`](https://git
 | Membre | Compte GitHub | Rôle |
 |---|---|---|
 | Denilsson | [@DENFR18](https://github.com/DENFR18) | Propriétaire du fork, code owner |
-| Illies | [@IB432](https://github.com/IB432) | Collaborateur (write), code owner |
+| Binôme | [@IB432](https://github.com/IB432) | Collaborateur (write), code owner |
 
 ## Structure du projet
 
@@ -24,6 +24,7 @@ Ce dépôt est un fork public de [`9m7fjfpv9k-cyber/cicd-fil-rouge`](https://git
 │       └── publish-images.yml    # Publication des images TaskFlow
 ├── app/                          # Code de l'API FastAPI
 ├── tests/                        # Tests pytest (conftest.py + suites)
+├── docs/images/                  # Captures du lab
 ├── Dockerfile
 ├── pyproject.toml
 └── README.md
@@ -73,9 +74,38 @@ docker build -t taskflow:faulty --build-arg FAILURE_RATE=0.2 --build-arg LATENCY
 | Pull request obligatoire | Aucun push direct sur `main` |
 | 1 approbation requise | Une PR doit être approuvée par un collaborateur avec droits d'écriture |
 | Review des code owners | Toute modification de `.github/workflows/` doit être approuvée par un code owner (voir [`.github/CODEOWNERS`](.github/CODEOWNERS)) |
-| Status checks requis | Les jobs `lint` et `test` doivent être verts |
+| Status checks requis | Les jobs `lint` et `test` doivent être verts (voir [Pipeline CI](#pipeline-ci)) |
 | Block force pushes | Réécriture de l'historique interdite |
 | Restrict deletions | Suppression de `main` interdite |
+
+### Mise en place
+
+1. **Fork public et binôme.** Le dépôt `9m7fjfpv9k-cyber/cicd-fil-rouge` a été forké en public, cloné en local, et IB432 a été invité comme collaborateur avec droits d'écriture.
+
+   ![Invitation du binôme](docs/images/collaborateur-invite.png)
+
+2. **Ruleset sur `main`.** Création du ruleset `protect-main` ciblant la branche par défaut : PR obligatoire, 1 approbation, force push et suppression interdits.
+
+   ![Règles du ruleset protect-main](docs/images/ruleset-protect-main.png)
+
+3. **Push direct refusé.** Une tentative de `git push` directement sur `main` est rejetée par GitHub :
+
+```
+   remote: - Changes must be made through a pull request.
+    ! [remote rejected] main -> main (push declined due to repository rule violations)
+```
+
+   ![Push direct refusé](docs/images/push-refuse.png)
+
+4. **Branche `feat/equipe-readme` et PR #1.** La modification passe par une PR vers `main`. Tant que le binôme n'a pas approuvé, la PR affiche « Review required » et le merge est bloqué :
+
+   ![PR bloquée sans review](docs/images/pr-review-required.png)
+
+   Une fois la PR approuvée par IB432, le merge devient possible :
+
+   ![PR approuvée](docs/images/pr-approuvee.png)
+
+5. **CODEOWNERS.** Le fichier `.github/CODEOWNERS` désigne DENFR18 et IB432 comme propriétaires de `.github/workflows/`, et l'option *Require review from Code Owners* est activée dans le ruleset.
 
 ### Workflow de contribution
 
@@ -84,25 +114,6 @@ docker build -t taskflow:faulty --build-arg FAILURE_RATE=0.2 --build-arg LATENCY
 3. Attendre que `lint` et `test` soient verts.
 4. Faire approuver par le binôme.
 5. Merger.
-
-### Démonstration
-
-**Push direct refusé.** Une tentative de `git push` sur `main` est rejetée par GitHub :
-
-```
-remote: - Changes must be made through a pull request.
- ! [remote rejected] main -> main (push declined due to repository rule violations)
-```
-
-![Push direct refusé](docs/images/push-refuse.png)
-
-**Merge bloqué sans approbation.** La PR #1 affiche « Review required » et le bouton Merge est grisé tant que le binôme n'a pas approuvé :
-
-![PR bloquée sans review](docs/images/pr-review-required.png)
-
-**Merge autorisé après approbation.** Une fois la PR approuvée par IB432, le merge devient possible :
-
-![PR approuvée](docs/images/pr-approuvee.png)
 
 ## Pipeline CI
 
@@ -127,6 +138,26 @@ Les deux jobs n'ont aucune dépendance entre eux, ils s'exécutent donc **en par
 | `test` | [pytest](https://docs.pytest.org/) | `pytest -v` | Exécution de la suite de tests de l'API TaskFlow (13 tests dans `tests/` : santé, CRUD des tâches, recherche, token requis pour la suppression, injection de pannes). La configuration est lue dans `pyproject.toml`. Le job échoue si un seul test échoue. |
 
 Le job `test` installe `pytest`, `httpx` et les dépendances du projet. `httpx` est nécessaire au `TestClient` de FastAPI utilisé dans `tests/conftest.py`.
+
+### Mise en place
+
+1. **Activation de GitHub Actions** sur le fork, depuis l'onglet Actions. Les workflows sont désactivés par défaut sur un fork.
+2. **Branche `feat/ci`** : ajout de `.github/workflows/ci.yml` avec les jobs `lint` et `test`.
+3. **PR #2 vers `main`** :
+   - Run #1 ❌ : `test` échouait au chargement de `tests/conftest.py` (`RuntimeError: The starlette.testclient module requires the httpx package`).
+   - Correctif : ajout de `httpx` à l'installation des dépendances du job `test`.
+   - Run #2 ✅ : `lint` et `test` verts, PR approuvée par le binôme puis mergée.
+   - Run #3 ✅ : le workflow se relance automatiquement sur `main` après le merge (déclencheur `push`).
+
+   ![Historique des runs CI](docs/images/actions-runs.png)
+
+   ![CI verte sur main après le merge](docs/images/ci-main-success.png)
+
+4. **Ruleset : status checks obligatoires.** Une fois que `lint` et `test` ont tourné au moins une fois, ils sont ajoutés comme checks requis dans `protect-main` (option *Require status checks to pass*). Une PR ne peut plus être mergée si l'un des deux échoue.
+
+   ![Status checks requis dans le ruleset](docs/images/ruleset-status-checks.png)
+
+5. **Branche `fix/casse-test`** : vérification que le blocage fonctionne (voir ci-dessous).
 
 ### Démonstration : merge bloqué par un test en échec
 
