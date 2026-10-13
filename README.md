@@ -1,5 +1,7 @@
 # cicd-fil-rouge — TaskFlow API
 
+[![CI](https://github.com/DENFR18/cicd-fil-rouge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DENFR18/cicd-fil-rouge/actions/workflows/ci.yml)
+
 API de gestion de tâches développée avec **FastAPI**, support du fil rouge CI/CD.
 
 Fonctionnalités : création, complétion et recherche de tâches, suppression protégée par token, endpoint de santé, et injection de pannes configurable pour les exercices de fiabilité.
@@ -20,7 +22,7 @@ Ce dépôt est un fork public de [`9m7fjfpv9k-cyber/cicd-fil-rouge`](https://git
 ├── .github/
 │   ├── CODEOWNERS
 │   └── workflows/
-│       ├── ci.yml                # Lint + tests sur chaque PR
+│       ├── ci.yml                # Lint + tests (matrice) + CI OK
 │       └── publish-images.yml    # Publication des images TaskFlow
 ├── app/                          # Code de l'API FastAPI
 ├── tests/                        # Tests pytest (conftest.py + suites)
@@ -73,8 +75,9 @@ docker build -t taskflow:faulty --build-arg FAILURE_RATE=0.2 --build-arg LATENCY
 |---|---|
 | Pull request obligatoire | Aucun push direct sur `main` |
 | 1 approbation requise | Une PR doit être approuvée par un collaborateur avec droits d'écriture |
+| Approbations périmées annulées | Un nouveau push sur la PR annule les approbations précédentes |
 | Review des code owners | Toute modification de `.github/workflows/` doit être approuvée par un code owner (voir [`.github/CODEOWNERS`](.github/CODEOWNERS)) |
-| Status checks requis | Les jobs `lint` et `test` doivent être verts (voir [Pipeline CI](#pipeline-ci)) |
+| Status check requis | Le job `CI OK` doit être vert (voir [Job CI OK](#job-ci-ok)) |
 | Block force pushes | Réécriture de l'historique interdite |
 | Restrict deletions | Suppression de `main` interdite |
 
@@ -111,8 +114,8 @@ docker build -t taskflow:faulty --build-arg FAILURE_RATE=0.2 --build-arg LATENCY
 
 1. Créer une branche depuis `main` à jour (`feat/...`, `fix/...`, `docs/...`).
 2. Pousser la branche et ouvrir une PR **vers `main` du fork** (attention au « base repository »).
-3. Attendre que `lint` et `test` soient verts.
-4. Faire approuver par le binôme.
+3. Attendre que `CI OK` soit vert.
+4. Faire approuver par le binôme (à refaire après chaque nouveau push).
 5. Merger.
 
 ## Pipeline CI
@@ -126,20 +129,21 @@ Le workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) garantit qu'*
 | `pull_request` | vers `main` | Valider le code avant le merge |
 | `push` | `main` | Revalider `main` après chaque merge |
 
-Le workflow tourne sur `ubuntu-latest` avec Python 3.12, et ses permissions sont limitées à `contents: read`.
+Les jobs tournent sur `ubuntu-24.04`, et les permissions du workflow sont limitées à `contents: read`.
 
 ### Jobs
 
-Les deux jobs n'ont aucune dépendance entre eux, ils s'exécutent donc **en parallèle**.
+`lint` et les trois `test` s'exécutent **en parallèle**. `CI OK` attend leur fin.
 
 | Job | Outil | Commande | Ce qu'il vérifie |
 |---|---|---|---|
 | `lint` | [ruff](https://docs.astral.sh/ruff/) | `ruff check .` | Analyse statique de tout le code Python : erreurs de syntaxe, imports inutilisés, variables non définies et règles de style (par exemple W292, retour à la ligne manquant en fin de fichier). Le job échoue dès qu'une règle est violée. |
-| `test` | [pytest](https://docs.pytest.org/) | `pytest -v` | Exécution de la suite de tests de l'API TaskFlow (13 tests dans `tests/` : santé, CRUD des tâches, recherche, token requis pour la suppression, injection de pannes). La configuration est lue dans `pyproject.toml`. Le job échoue si un seul test échoue. |
+| `test (3.11)`, `test (3.12)`, `test (3.13)` | [pytest](https://docs.pytest.org/) | `pytest -v --junitxml=...` | Exécution de la suite de 12 tests de l'API TaskFlow (santé, CRUD des tâches, recherche, token requis pour la suppression, injection de pannes) sur chaque version de Python. La configuration est lue dans `pyproject.toml`. Chaque job échoue si un seul test échoue, et publie son rapport JUnit en artefact. |
+| `CI OK` | bash | — | Agrège le résultat de `lint` et de `test` : vert uniquement si tous ont réussi. C'est le seul check obligatoire du ruleset. |
 
-Le job `test` installe `pytest`, `httpx` et les dépendances du projet. `httpx` est nécessaire au `TestClient` de FastAPI utilisé dans `tests/conftest.py`.
+Les jobs `test` installent `pytest`, `httpx` et les dépendances du projet. `httpx` est nécessaire au `TestClient` de FastAPI utilisé dans `tests/conftest.py`.
 
-### Mise en place
+### Partie 1 : lint et tests obligatoires
 
 1. **Activation de GitHub Actions** sur le fork, depuis l'onglet Actions. Les workflows sont désactivés par défaut sur un fork.
 2. **Branche `feat/ci`** : ajout de `.github/workflows/ci.yml` avec les jobs `lint` et `test`.
@@ -153,13 +157,13 @@ Le job `test` installe `pytest`, `httpx` et les dépendances du projet. `httpx` 
 
    ![CI verte sur main après le merge](docs/images/ci-main-success.png)
 
-4. **Ruleset : status checks obligatoires.** Une fois que `lint` et `test` ont tourné au moins une fois, ils sont ajoutés comme checks requis dans `protect-main` (option *Require status checks to pass*). Une PR ne peut plus être mergée si l'un des deux échoue.
+4. **Ruleset : status checks obligatoires.** Une fois que `lint` et `test` ont tourné au moins une fois, ils sont ajoutés comme checks requis dans `protect-main`. Ils ont ensuite été remplacés par `CI OK` en partie 2.
 
    ![Status checks requis dans le ruleset](docs/images/ruleset-status-checks.png)
 
-5. **Branche `fix/casse-test`** : vérification que le blocage fonctionne (voir ci-dessous).
+5. **Branche `fix/casse-test`** : vérification que le blocage fonctionne.
 
-### Démonstration : merge bloqué par un test en échec
+#### Démonstration : merge bloqué par un test en échec
 
 La branche `fix/casse-test` ajoute volontairement un test faux :
 
@@ -179,6 +183,60 @@ Résultat sur la PR #3 :
 ![Log pytest du job test](docs/images/log-test-casse.png)
 
 La PR a été fermée sans être mergée.
+
+### Partie 2 : un pipeline plus rapide, toujours aussi strict
+
+Branche `feat/ci-rapide`, PR #6.
+
+#### Optimisations
+
+- **Cache pip** : `setup-python` met en cache les paquets téléchargés, avec une clé calculée sur `requirements*.txt` et `pyproject.toml`. Le cache est invalidé dès que les dépendances changent.
+- **Matrice Python** : les tests tournent sur 3.11, 3.12 et 3.13. Avec `fail-fast: false`, les trois versions vont au bout même si l'une échoue.
+- **Rapport de tests en artefact** : chaque version publie son rapport JUnit XML (`rapport-tests-3.11`, `-3.12`, `-3.13`, conservés 7 jours), même en cas d'échec.
+- **Concurrency** : un seul run par branche. Un nouveau push sur une PR annule le run en cours ; sur `main`, chaque run va au bout.
+
+![Concurrency et cache pip dans ci.yml](docs/images/2.png)
+
+#### Durée d'installation des dépendances (job `test (3.11)`)
+
+| Run | Cache | Durée de l'étape « Installer les dépendances » |
+|---|---|---|
+| Run #12 (premier run de la branche) | Absent (*Cache not found*) | 6 s |
+| Re-run | Restauré (*Cache restored*) | XX s |
+
+Le cache pip évite le téléchargement des paquets, pas leur installation : sur un projet avec peu de dépendances, le gain se compte en secondes. Il devient plus intéressant quand les dépendances sont nombreuses ou lourdes.
+
+![Durée sans cache](docs/images/1.png)
+
+![Durée avec cache](docs/images/cache-avec.png)
+
+#### Artefacts
+
+Le run de la PR publie trois artefacts, un par version de Python (environ 520 octets chacun). Le rapport `junit-3.12.xml` téléchargé indique 12 tests, 0 échec et 0 erreur.
+
+![Artefacts du run](docs/images/artefacts-run.png)
+
+![Rapport JUnit téléchargé](docs/images/8.png)
+
+#### Job CI OK
+
+Avec la matrice, le job `test` est publié sous les noms `test (3.11)`, `test (3.12)` et `test (3.13)`. Le ruleset attendait toujours un check nommé `test`, qui restait en *Expected — Waiting for status to be reported* : la PR était bloquée alors que tous les jobs étaient verts.
+
+![PR bloquée par le check test attendu](docs/images/4.png)
+
+Le job `CI OK` attend la fin de `lint` et des trois `test (3.x)`, et n'est vert que si tous ont réussi : c'est le **seul check obligatoire** du ruleset, ce qui évite de modifier la protection de `main` à chaque ajout de job ou de version de Python dans la matrice. Il tourne avec `if: always()`, car sans cette condition il serait *skipped* en cas d'échec, et GitHub considère un check requis *skipped* comme validé.
+
+![Job ci-ok dans ci.yml](docs/images/3.png)
+
+![Log du job CI OK](docs/images/5.png)
+
+Dans le ruleset, `lint` et `test` ont été remplacés par `CI OK` :
+
+![CI OK seul check requis](docs/images/6.png)
+
+Le push du job `CI OK` a annulé l'approbation précédente d'IB432 (*dismissed stale review*). Après une nouvelle approbation et `CI OK` vert, la PR est devenue mergeable :
+
+![PR #6 mergeable](docs/images/7.png)
 
 ### Lancer les vérifications en local
 
