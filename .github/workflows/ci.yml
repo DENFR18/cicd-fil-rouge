@@ -62,3 +62,19 @@ jobs:
           name: rapport-tests-${{ matrix.python-version }}
           path: reports/junit-${{ matrix.python-version }}.xml
           retention-days: 7
+
+  ci-ok:
+    name: CI OK
+    needs: [lint, test]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Vérifier le résultat des jobs
+        run: |
+          echo "lint : ${{ needs.lint.result }}"
+          echo "test : ${{ needs.test.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Au moins un job a échoué ou a été annulé."
+            exit 1
+          fi
+          echo "Tous les jobs sont verts."
